@@ -8,27 +8,8 @@ from synthseries.diffusion import DiffusionProcess
 from synthseries.models.tcn_unet import TCNUNet1D
 from synthseries.training.engine import DDPMEngine
 
-def generate_gbm_paths(num_paths=64, seq_len=128, mu=0.0, sigma=0.02, S0=1.0):
-    """Generates Geometric Brownian Motion paths as a toy financial dataset."""
-    dt = 1.0 / seq_len
-    paths = np.zeros((num_paths, seq_len))
-    paths[:, 0] = S0
-    for t in range(1, seq_len):
-        Z = np.random.standard_normal(num_paths)
-        paths[:, t] = paths[:, t-1] * np.exp((mu - 0.5 * sigma**2) * dt + sigma * np.sqrt(dt) * Z)
-    
-    log_returns = np.diff(np.log(paths), axis=1)
-    log_returns = np.pad(log_returns, ((0,0), (1,0)), mode='constant')
-    
-    mean = np.mean(log_returns)
-    std = np.std(log_returns)
-    normalized_returns = (log_returns - mean) / (std + 1e-8)
-    
-    tensor_data = torch.tensor(normalized_returns, dtype=torch.float32).unsqueeze(1)
-    return tensor_data, mean, std, S0
-
 def process_real_data(df, seq_len=128):
-    """Processes uploaded Kaggle CSV (e.g. Nifty 50 minute data)."""
+    """Processes uploaded CSV financial data."""
     # Find the close column, case insensitive
     close_col = [col for col in df.columns if 'close' in col.lower()]
     if not close_col:
@@ -72,11 +53,7 @@ st.markdown("Interactive Hyperparameter Tuning and Visualization for Synthetic F
 
 with st.sidebar:
     st.header("📂 Data Source")
-    data_source = st.radio("Select Dataset", ["Toy Data (GBM)", "Upload CSV (Real Data)"])
-    
-    uploaded_file = None
-    if data_source == "Upload CSV (Real Data)":
-        uploaded_file = st.file_uploader("Upload Nifty 50 CSV (must contain 'close' column)", type=["csv"])
+    uploaded_file = st.file_uploader("Upload CSV Dataset (must contain a 'close' column)", type=["csv"])
         
     st.header("⚙️ Hyperparameters")
     
@@ -98,17 +75,14 @@ with st.sidebar:
 # Main Area
 dataset, data_mean, data_std, S0_val = None, None, None, None
 
-if data_source == "Toy Data (GBM)":
-    dataset, data_mean, data_std, S0_val = generate_gbm_paths(num_paths=128, seq_len=seq_len, sigma=0.1)
+if uploaded_file is not None:
+    try:
+        df = pd.read_csv(uploaded_file)
+        dataset, data_mean, data_std, S0_val = process_real_data(df, seq_len=seq_len)
+    except Exception as e:
+        st.error(f"Error parsing CSV: {e}")
 else:
-    if uploaded_file is not None:
-        try:
-            df = pd.read_csv(uploaded_file)
-            dataset, data_mean, data_std, S0_val = process_real_data(df, seq_len=seq_len)
-        except Exception as e:
-            st.error(f"Error parsing CSV: {e}")
-    else:
-        st.info("Please upload a CSV file to continue.")
+    st.info("Please upload a CSV file to continue.")
 
 if dataset is not None:
     st.header("1. Training Dataset (Normalized Log Returns)")
